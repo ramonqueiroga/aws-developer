@@ -1,4 +1,14 @@
 #when creating a VPC, we have to specify a subnet and link the security group and VPC with a NetworkInterface. After this, associate the NetworkInterface with the EC2 Instance
+Mappings:
+  VpcMapping:
+    Vpc:
+      "Ip": "10.0.0.0/16"
+    OpenCIDR:
+      "Ip": "0.0.0.0/0"
+    SubnetOne:
+      "Ip": "10.0.1.0/24"
+    SubnetTwo:
+      "Ip": "10.0.2.0/24"
 
 Parameters:
   MyKeyPair:
@@ -8,19 +18,24 @@ Parameters:
   InstanceType:
     Description: WebServer EC2 instance type
     Type: String
-    Default: t2.small
+    Default: t2.micro 
     AllowedValues:
     - t1.micro
     - t2.nano
     - t2.micro
     - t2.small
     - t2.medium
+  MyAMI:
+    Description: Choose the image to create the machine
+    Type: String
+    AllowedValues:
+    - ami-003449ffb2605a74c
 
 Resources:
   VPC:
     Type: AWS::EC2::VPC
     Properties:
-      CidrBlock: '10.0.0.0/16'
+      CidrBlock: !FindInMap [ VpcMapping, Vpc, Ip ]
 
   PublicSubnetOne:
     Type: AWS::EC2::Subnet
@@ -30,7 +45,7 @@ Resources:
           - 0
           - Fn::GetAZs: {Ref: 'AWS::Region'}
       VpcId: !Ref 'VPC'
-      CidrBlock: '10.0.1.0/24'
+      CidrBlock: !FindInMap [ VpcMapping, SubnetOne, Ip ]
       MapPublicIpOnLaunch: true
 
   PublicSubnetTwo:
@@ -41,7 +56,7 @@ Resources:
           - 1
           - Fn::GetAZs: {Ref: 'AWS::Region'}
       VpcId: !Ref 'VPC'
-      CidrBlock: '10.0.2.0/24'
+      CidrBlock: !FindInMap [ VpcMapping, SubnetTwo, Ip ]
       MapPublicIpOnLaunch: true
 
   InternetGateway:
@@ -60,7 +75,7 @@ Resources:
     DependsOn: GatewayAttachement
     Properties:
       RouteTableId: !Ref 'PublicRouteTable'
-      DestinationCidrBlock: '0.0.0.0/0'
+      DestinationCidrBlock: !FindInMap [ VpcMapping, OpenCIDR, Ip ]
       GatewayId: !Ref 'InternetGateway'
   PublicSubnetOneRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -73,6 +88,7 @@ Resources:
       SubnetId: !Ref PublicSubnetTwo
       RouteTableId: !Ref PublicRouteTable
  
+  #SECURITY GROUPS
   HTTPSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -94,9 +110,20 @@ Resources:
       - IpProtocol: tcp
         FromPort: 22
         ToPort: 22
-        CidrIp: 0.0.0.0/0
-      VpcId: !Ref 'VPC'      
-      
+        CidrIp: !FindInMap [ VpcMapping, OpenCIDR, Ip ]
+      VpcId: !Ref 'VPC'
+
+  LBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Load Balancer Securirty Group
+      GroupName: Load Balancer Security Group
+      VpcId: !Ref 'VPC'
+      SecurityGroupIngress:
+      - CidrIp: !FindInMap [ VpcMapping, OpenCIDR, Ip ]
+        IpProtocol: -1   
+
+  #NETWORK INTERFACES (LINK THE EC2 WITH THE VPC NETWORK AND AZs)
   NewNetWorkInterfaceOne:
     Type: AWS::EC2::NetworkInterface
     Properties:
@@ -117,11 +144,12 @@ Resources:
       Description: "Network for subnet two"
       SourceDestCheck: 'false'      
     
-  MyEC2Instance:
+  #EC2 INSTANCE WITH A USER DATA
+  MyNewEC2Instance:
     Type: AWS::EC2::Instance
     Properties:
-      ImageId: "ami-003449ffb2605a74c"
-      InstanceType: "t2.micro"
+      ImageId: !Ref MyAMI
+      InstanceType: !Ref InstanceType
       KeyName: !Ref MyKeyPair
       AvailabilityZone:
         Fn::Select:
@@ -140,6 +168,7 @@ Resources:
               systemctl enable httpd.service
               echo "Hello world from $(hostname -f)" > /var/www/html/index.html
 
+  # LOAD BALANCER
   MyLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
@@ -151,16 +180,6 @@ Resources:
         - !Ref PublicSubnetOne
         - !Ref PublicSubnetTwo
       SecurityGroups: [!Ref 'LBSecurityGroup']
-
-  LBSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Load Balancer Securirty Group
-      GroupName: Load Balancer Security Group
-      VpcId: !Ref 'VPC'
-      SecurityGroupIngress:
-      - CidrIp: 0.0.0.0/0
-        IpProtocol: -1   
 
   LBTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -176,7 +195,7 @@ Resources:
       UnhealthyThresholdCount: 2
       VpcId: !Ref 'VPC'
       Targets:
-        - Id: !Ref MyEC2Instance
+        - Id: !Ref MyNewEC2Instance
 
   LBListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -189,3 +208,5 @@ Resources:
       LoadBalancerArn: !Ref 'MyLoadBalancer'
       Port: 80
       Protocol: HTTP
+
+  #AUTO SCALING GROUP
