@@ -145,28 +145,28 @@ Resources:
       SourceDestCheck: 'false'      
     
   #EC2 INSTANCE WITH A USER DATA
-  MyNewEC2Instance:
-    Type: AWS::EC2::Instance
-    Properties:
-      ImageId: !Ref MyAMI
-      InstanceType: !Ref InstanceType
-      KeyName: !Ref MyKeyPair
-      AvailabilityZone:
-        Fn::Select:
-          - 0
-          - Fn::GetAZs: {Ref: 'AWS::Region'}
-      NetworkInterfaces: 
-        - NetworkInterfaceId: !Ref NewNetWorkInterfaceOne
-          DeviceIndex: 0
-      UserData:
-        Fn::Base64:
-          !Sub |
-              #!/bin/bash
-              yum update -y
-              yum install -y httpd.x86_64
-              systemctl start httpd.service
-              systemctl enable httpd.service
-              echo "Hello world from $(hostname -f)" > /var/www/html/index.html
+  # MyNewEC2Instance:
+  #   Type: AWS::EC2::Instance
+  #   Properties:
+  #     ImageId: !Ref MyAMI
+  #     InstanceType: !Ref InstanceType
+  #     KeyName: !Ref MyKeyPair
+  #     AvailabilityZone:
+  #       Fn::Select:
+  #         - 0
+  #         - Fn::GetAZs: {Ref: 'AWS::Region'}
+  #     NetworkInterfaces: 
+  #       - NetworkInterfaceId: !Ref NewNetWorkInterfaceOne
+  #         DeviceIndex: 0
+  #     UserData:
+  #       Fn::Base64:
+  #         !Sub |
+  #             #!/bin/bash
+  #             yum update -y
+  #             yum install -y httpd.x86_64
+  #             systemctl start httpd.service
+  #             systemctl enable httpd.service
+  #             echo "Hello world from $(hostname -f)" > /var/www/html/index.html
 
   # LOAD BALANCER
   MyLoadBalancer:
@@ -278,6 +278,7 @@ Resources:
       InstanceType: !Ref InstanceType
       KeyName: !Ref MyKeyPair
       LaunchConfigurationName: MyFirstLCFromCloudFormation
+      IamInstanceProfile: !Ref RootInstanceProfile
       SecurityGroups:
       - !Ref HTTPSecurityGroup
       - !Ref SSHSecurityGroup
@@ -296,3 +297,37 @@ Resources:
               systemctl start httpd.service
               systemctl enable httpd.service
               echo "Hello world from $(hostname -f)" > /var/www/html/index.html
+
+  RootRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "ec2.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "root"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Action: "*"
+                Resource: "*"
+  
+  RootInstanceProfile:
+          Type: "AWS::IAM::InstanceProfile"
+          Properties:
+            Path: "/"
+            Roles:
+              -
+                !Ref RootRole
+      
