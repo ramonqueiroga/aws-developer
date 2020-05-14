@@ -89,18 +89,18 @@ Resources:
       RouteTableId: !Ref PublicRouteTable
  
   #SECURITY GROUPS
-  HTTPSecurityGroup:
+  CustomSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: HTTP security group
       GroupName: HTTP Group Name Replacement
       SecurityGroupIngress:
       - IpProtocol: tcp
-        FromPort: 80
-        ToPort: 80
+        FromPort: 8080
+        ToPort: 8080
         SourceSecurityGroupId: !Ref LBSecurityGroup
       VpcId: !Ref 'VPC'
-  
+    
   SSHSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -121,14 +121,16 @@ Resources:
       VpcId: !Ref 'VPC'
       SecurityGroupIngress:
       - CidrIp: !FindInMap [ VpcMapping, OpenCIDR, Ip ]
-        IpProtocol: -1   
+        IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
 
   #NETWORK INTERFACES (LINK THE EC2 WITH THE VPC NETWORK AND AZs)
   NewNetWorkInterfaceOne:
     Type: AWS::EC2::NetworkInterface
     Properties:
       GroupSet:
-        - !Ref HTTPSecurityGroup
+        - !Ref CustomSecurityGroup
         - !Ref SSHSecurityGroup
       SubnetId: !Ref PublicSubnetOne
       Description: "Network for subnet one"
@@ -138,7 +140,7 @@ Resources:
     Type: AWS::EC2::NetworkInterface
     Properties:
       GroupSet:
-        - !Ref HTTPSecurityGroup
+        - !Ref CustomSecurityGroup
         - !Ref SSHSecurityGroup
       SubnetId: !Ref PublicSubnetTwo
       Description: "Network for subnet two"
@@ -185,12 +187,12 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
       HealthCheckIntervalSeconds: 6
-      HealthCheckPath: /
+      HealthCheckPath: /health
       HealthCheckProtocol: HTTP
       HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 2
       Name: !Join ['-', [!Ref 'AWS::StackName', 'first-1']]
-      Port: 80
+      Port: 8080
       Protocol: HTTP
       UnhealthyThresholdCount: 2
       VpcId: !Ref 'VPC'
@@ -214,7 +216,7 @@ Resources:
       LaunchConfigurationName: !Ref MyLaunchConfiguration
       MinSize: '1'
       MaxSize: '3'
-      DesiredCapacity: '2'
+      DesiredCapacity: '1'
       HealthCheckGracePeriod: 30
       VPCZoneIdentifier:
       - !Ref PublicSubnetOne
@@ -280,7 +282,7 @@ Resources:
       LaunchConfigurationName: MyFirstLCFromCloudFormation
       IamInstanceProfile: !Ref RootInstanceProfile
       SecurityGroups:
-      - !Ref HTTPSecurityGroup
+      - !Ref CustomSecurityGroup
       - !Ref SSHSecurityGroup
       BlockDeviceMappings:
       - DeviceName: "/dev/sdk"
