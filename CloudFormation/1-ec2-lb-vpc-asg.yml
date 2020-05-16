@@ -275,6 +275,20 @@ Resources:
   MyLaunchConfiguration:
     Type: AWS::AutoScaling::LaunchConfiguration
     Description: My first launch configuration from CloudFormation
+    Metadata: 
+      AWS::CloudFormation::Init: 
+        configSets:
+          Install:
+            - "Install"
+        Install:
+          # packages:
+          #   yum:
+          #     java-1.8.0-openjdk: []
+          commands:
+            java11:
+              command: "sudo amazon-linux-extras install java-openjdk11"
+            downloadS3:
+              command: "aws s3 cp s3://my-app-rq/demo-0.0.1-SNAPSHOT.jar ."
     Properties:
       ImageId: !Ref MyAMI
       InstanceType: !Ref InstanceType
@@ -294,11 +308,9 @@ Resources:
         Fn::Base64:
           !Sub |
               #!/bin/bash
-              yum update -y
-              yum install -y httpd.x86_64
-              systemctl start httpd.service
-              systemctl enable httpd.service
-              echo "Hello world from $(hostname -f)" > /var/www/html/index.html
+              yum install -y aws-cfn-bootstrap
+              /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource MyLaunchConfiguration --configsets Install --region ${AWS::Region}
+              java -jar demo-0.0.1-SNAPSHOT.jar
 
   RootRole:
     Type: AWS::IAM::Role
