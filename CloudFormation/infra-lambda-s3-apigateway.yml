@@ -1,0 +1,118 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Deploy a lambda function with golang"
+
+Parameters:
+    S3BucketParam:
+        Type: String
+    S3KeyParam: 
+        Type: String
+    S3ObjectVersionParam:
+        Type: String
+
+Resources:
+    ApiGatewayLambda:
+        Type: "AWS::ApiGateway::RestApi"
+        Properties:
+            Name: "api-gateway-lambda-golang"
+            Description: "My first api gateway calling a lambda"
+            EndpointConfiguration:
+                Types:
+                    - REGIONAL
+    UsersResource:
+        Type: 'AWS::ApiGateway::Resource'
+        Properties:
+            ParentId: !GetAtt ApiGatewayLambda.RootResourceId
+            RestApiId: !Ref ApiGatewayLambda
+            PathPart: 'users'
+
+    ApiGatewayLambdaPOSTMethod:
+        Type: "AWS::ApiGateway::Method"
+        Properties:
+            AuthorizationType: "NONE"
+            HttpMethod: "POST"
+            Integration:
+                IntegrationHttpMethod: "POST"
+                Type: "AWS_PROXY"
+                Uri: !Sub
+                - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations"
+                - lambdaArn: !GetAtt "LambdaGolang.Arn"
+                IntegrationResponses:
+                    - StatusCode: 200
+            # ResourceId: !GetAtt "ApiGatewayLambda.RootResourceId"
+            ResourceId: !Ref UsersResource
+            RestApiId: !Ref "ApiGatewayLambda"
+
+    LambdaExecutionRole:
+        Type: "AWS::IAM::Role"
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: '2012-10-17'
+                Statement:
+                    - 
+                        Effect: Allow
+                        Principal:
+                            Service:
+                                - lambda.amazonaws.com
+                        Action:
+                            - sts:AssumeRole
+            Path: "/"
+            Policies:
+                - 
+                    PolicyName: "logs-s3"
+                    PolicyDocument: 
+                        Version: '2012-10-17'
+                        Statement:
+                            - 
+                                Effect: Allow
+                                Action:
+                                    - logs:*
+                                Resource: arn:aws:logs:*:*:*
+                            -
+                                Effect: Allow
+                                Action:
+                                    - s3:Get*
+                                    - s3:List*
+                                Resource: "*"
+                -
+                    PolicyName: "policy-lambda-sqs"
+                    PolicyDocument:
+                        Statement:
+                            - 
+                                Effect: Allow
+                                Action:
+                                    - sqs:SendMessage
+                                Resource: !Sub ${LambdaSqs.Arn}
+    LambdaGolang:
+        Type: "AWS::Lambda::Function"
+        Properties:
+            Description: This is a lambda for testing proposes
+            Environment:
+                Variables:
+                    SQS_URL: !Ref LambdaSqs
+                    REGION: sa-east-1
+            FunctionName: lambda-golang
+            Handler: "main"
+            Role:
+                Fn::GetAtt:
+                    - "LambdaExecutionRole"
+                    - "Arn"
+            Code:
+                S3Bucket:
+                    Ref: S3BucketParam
+                S3Key:
+                    Ref: S3KeyParam
+                S3ObjectVersion:
+                    Ref: S3ObjectVersionParam
+            Runtime: "go1.x"
+    LambdaPermission:
+        Type: "AWS::Lambda::Permission"
+        Properties:
+            Action: "lambda:InvokeFunction"
+            FunctionName: !GetAtt "LambdaGolang.Arn"
+            Principal: "apigateway.amazonaws.com"
+            SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayLambda}/*/POST/*"
+    
+    LambdaSqs:
+        Type: "AWS::SQS::Queue"
+        Properties:
+            QueueName: 'my-lambda-sqs'    
