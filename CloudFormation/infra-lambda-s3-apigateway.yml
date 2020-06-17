@@ -18,18 +18,18 @@ Resources:
             EndpointConfiguration:
                 Types:
                     - REGIONAL
-    UsersResource:
+    JokeResource:
         Type: 'AWS::ApiGateway::Resource'
         Properties:
             ParentId: !GetAtt ApiGatewayLambda.RootResourceId
             RestApiId: !Ref ApiGatewayLambda
-            PathPart: 'users'
+            PathPart: 'joke'
 
-    ApiGatewayLambdaPOSTMethod:
+    ApiGatewayLambdaGETMethod:
         Type: "AWS::ApiGateway::Method"
         Properties:
             AuthorizationType: "NONE"
-            HttpMethod: "POST"
+            HttpMethod: "GET"
             Integration:
                 IntegrationHttpMethod: "POST"
                 Type: "AWS_PROXY"
@@ -39,7 +39,7 @@ Resources:
                 IntegrationResponses:
                     - StatusCode: 200
             # ResourceId: !GetAtt "ApiGatewayLambda.RootResourceId"
-            ResourceId: !Ref UsersResource
+            ResourceId: !Ref JokeResource
             RestApiId: !Ref "ApiGatewayLambda"
 
     LambdaExecutionRole:
@@ -81,6 +81,7 @@ Resources:
                                 Effect: Allow
                                 Action:
                                     - sqs:SendMessage
+                                    - sqs:ReceiveMessage
                                 Resource: !Sub ${LambdaSqs.Arn}
     LambdaGolang:
         Type: "AWS::Lambda::Function"
@@ -89,7 +90,7 @@ Resources:
             Environment:
                 Variables:
                     SQS_URL: !Ref LambdaSqs
-                    REGION: sa-east-1
+                    REGION: !Sub ${AWS::Region}
             FunctionName: lambda-golang
             Handler: "main"
             Role:
@@ -104,15 +105,16 @@ Resources:
                 S3ObjectVersion:
                     Ref: S3ObjectVersionParam
             Runtime: "go1.x"
+            Timeout: 10
     LambdaPermission:
         Type: "AWS::Lambda::Permission"
         Properties:
             Action: "lambda:InvokeFunction"
             FunctionName: !GetAtt "LambdaGolang.Arn"
             Principal: "apigateway.amazonaws.com"
-            SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayLambda}/*/POST/*"
+            SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayLambda}/*/GET/joke"
     
     LambdaSqs:
         Type: "AWS::SQS::Queue"
         Properties:
-            QueueName: 'my-lambda-sqs'    
+            QueueName: 'my-lambda-sqs'
