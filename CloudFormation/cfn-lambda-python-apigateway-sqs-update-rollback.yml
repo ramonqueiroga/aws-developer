@@ -1,0 +1,213 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Deploy the engineering lambda challenge"
+
+Mappings:
+    Images:
+      us-east-1:
+        "key": "ami-123456"
+      us-east-2:
+        "key": "ami-654321"
+
+Parameters:
+    InstanceType:
+      Description: WebServer EC2 instance type
+      Type: String
+      Default: t2.micro 
+      AllowedValues:
+      - t1.micro
+      - t2.nano
+      - t2.micro
+      - t2.small
+      - t2.medium
+
+Resources:
+    ApiGatewayLambdaJoke:
+        Type: "AWS::ApiGateway::RestApi"
+        Properties:
+            Name: "api-gateway-lambda-joke"
+            Description: "Api gateway that exposes the lambda joke service"
+            EndpointConfiguration:
+                Types:
+                    - REGIONAL
+    
+    JokeResource:
+        Type: "AWS::ApiGateway::Resource"
+        Properties:
+            ParentId: !GetAtt ApiGatewayLambdaJoke.RootResourceId
+            RestApiId: !Ref ApiGatewayLambdaJoke
+            PathPart: "joke"
+    
+    JokeMethodPOST:
+        Type: "AWS::ApiGateway::Method"
+        Properties:
+            AuthorizationType: "NONE"
+            HttpMethod: "POST"
+            Integration:
+                IntegrationHttpMethod: "POST"
+                Type: "AWS_PROXY"
+                Uri: !Sub 
+                - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations"
+                - lambdaArn: !GetAtt "LambdaJoke.Arn"
+                IntegrationResponses:
+                    - StatusCode: 200
+            ResourceId: !Ref JokeResource
+            RestApiId: !Ref ApiGatewayLambdaJoke
+
+    LambdaExecutionRole:
+        Type: "AWS::IAM::Role"
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -
+                        Effect: Allow
+                        Principal:
+                            Service:
+                                - lambda.amazonaws.com
+                        Action:
+                            - sts:AssumeRole
+            Path: "/"
+            Policies:
+                -
+                    PolicyName: "logs"
+                    PolicyDocument:
+                        Version: "2012-10-17"
+                        Statement:
+                            -
+                                Effect: Allow
+                                Action:
+                                    - logs:*
+                                Resource: arn:aws:logs:*:*:*
+                -
+                    PolicyName: "s3"
+                    PolicyDocument:
+                        Version: "2012-10-17"
+                        Statement:
+                            -
+                                Effect: Allow
+                                Action:
+                                    - s3:Get*
+                                    - s3:List*
+                                Resource: "*"
+                -                    
+                    PolicyName: "sqs"
+                    PolicyDocument:
+                        Version: "2012-10-17"
+                        Statement:
+                            -
+                                Effect: Allow
+                                Action:
+                                    - sqs:SendMessage
+                                    - sqs:ReceiveMessage
+                                Resource: !Sub ${SQSLambda.Arn}
+                -
+                    PolicyName: "sqs-na"
+                    PolicyDocument:
+                        Version: "2012-10-17"
+                        Statement:
+                            -
+                                Effect: Allow
+                                Action:
+                                    - sqs:SendMessage
+                                    - sqs:ReceiveMessage
+                                Resource: !Sub ${SQSNALambda.Arn}
+    LambdaJoke:
+        Type: "AWS::Lambda::Function" 
+        Properties:
+            Description: "Engineering challenge lambda"
+            Environment:
+                Variables:
+                    SQS_URL: !Ref SQSLambda
+                    SQS_NA_URL: !Ref SQSNALambda
+                    JOKE_ENDPOINT: "https://us-central1-kivson.cloudfunctions.net/charada-aleatoria"
+                    SECURITY_ENDPOINT: "http://wdylike.appspot.com/?q="
+            FunctionName: "lambda-joke"
+            Handler: "index.lambda_handler"
+            Role:
+                Fn::GetAtt:
+                    - "LambdaExecutionRole"
+                    - "Arn"
+            # Code:
+            #     S3Bucket:
+            #         Ref: S3BucketParam
+            #     S3Key:
+            #         Ref: S3KeyParam
+            #     S3ObjectVersion:
+            #         Ref: S3ObjectVersionParam                   
+            Code:
+                ZipFile: |
+                    import json
+                    import boto3
+                    import urllib.request
+                    import os
+
+                    SQS_URL = os.getenv('SQS_URL')
+                    SQS_NA_URL = os.getenv('SQS_NA_URL')
+                    JOKE_ENDPOINT = os.getenv('JOKE_ENDPOINT')
+                    SECURITY_ENDPOINT = os.getenv('SECURITY_ENDPOINT')
+
+                    client = boto3.client('sqs')
+
+                    def lambda_handler(event, context):
+                        req = urllib.request.Request(JOKE_ENDPOINT)
+                        req.add_header("Accept", "application/json")
+                        jokeText = urllib.requet.urlopen(req).read().decode("utf-8")
+                        joke = json.loads(jokeText)
+
+                        question = urllib.parse.quote(joke["pergunta"])
+                        answer = urllib.parse.quote(joke["resposta"])
+
+                        profanityQuestion = urllib.request.urlopen(SECURITY_ENDPOINT + question).read().decode("utf-8")
+                        profanityAnswer = urllib.request.urlopen(SECURITY_ENDPOINT + answer).read().decode("utf-8")
+
+                        if(profanityQuestion == "false" and profanityAnswer == "false"):
+                            client.send_message(QueueUrl=SQS_URL, MessageBody=jokeText)
+                        else:
+                            client.send_message(QueueUrl=SQS_NA_URL, MessageBody=jokeText)
+
+                        return {
+                            "isBase64Encoded:" "false",
+                            "statusCode": 200,
+                            "headers": { "Accept": "application/json" }
+                            "body": jokeText
+                        }
+            Runtime: "python3.7"
+            Timeout: 10
+        
+    LambdaPermission:
+        Type: "AWS::Lambda::Permission"
+        Properties:
+            Action: "lambda:InvokeFunction"
+            FunctionName: !GetAtt "LambdaJoke.Arn"
+            Principal: "apigateway.amazonaws.com"
+            SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayLambdaJoke}/*/POST/joke"
+    
+    SQSLambda:
+        Type: "AWS::SQS::Queue"
+        Properties:
+            QueueName: 'sqs-lambda'
+    
+    SQSNALambda:
+        Type: "AWS::SQS::Queue"
+        Properties:
+            QueueName: 'sqs-na-lambda'
+
+    MyInstance:
+        Type: "AWS::EC2::Instance"
+        Properties:
+            AvailabilityZone:
+                Fn::Select:
+                  - 0
+                  - Fn::GetAZs: {Ref: 'AWS::Region'}
+            ImageId: !FindInMap [ Images, !Ref "AWS::Region", key ]
+            InstanceType: !Ref InstanceType
+
+Outputs:
+    StackSQSLink:
+        Description: "SQS non profanity jokes"
+        Value: !Ref SQSLambda
+    StackSQSNALink:
+        Description: "SQS profanity jokes"
+        Value: !Ref SQSNALambda
+        Export:
+            Name: SQSProfanityQueue            
